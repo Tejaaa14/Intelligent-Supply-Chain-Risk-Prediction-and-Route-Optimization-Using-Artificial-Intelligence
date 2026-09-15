@@ -1,10 +1,15 @@
 import React from 'react';
 import { AlertTriangle, ShieldCheck, Zap, Activity } from 'lucide-react';
 
-const RiskCard = ({ riskData }) => {
+const RiskCard = ({ riskData, explanation }) => {
   if (!riskData) return null;
 
   const { risk_probability = 75, risk_level = 'HIGH', confidence = 89, feature_contributions = {} } = riskData;
+  
+  // Use real SHAP from explanation if available, otherwise fallback to risk model pseudo-contributions
+  const factors = explanation?.top_risk_drivers?.length > 0 
+      ? explanation.top_risk_drivers.map(d => ({ factor: d.factor, percent: d.impact_percentage }))
+      : Object.entries(feature_contributions).map(([f, p]) => ({ factor: f, percent: p }));
 
   const getLevelColor = (level) => {
     switch (level) {
@@ -49,10 +54,10 @@ const RiskCard = ({ riskData }) => {
       <div style={{ marginTop: '20px' }}>
         <div style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 600, marginBottom: '10px' }}>Key Disruption Factors</div>
         
-        {Object.entries(feature_contributions).map(([factor, percent]) => (
+        {factors.map(({ factor, percent }) => (
           <div key={factor} style={{ marginBottom: '8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#94a3b8', marginBottom: '4px' }}>
-              <span style={{ textTransform: 'capitalize' }}>{factor.replace('_', ' ')}</span>
+              <span style={{ textTransform: 'capitalize' }}>{factor.replace(/_/g, ' ')}</span>
               <span style={{ fontWeight: 600, color: '#f8fafc' }}>{percent}%</span>
             </div>
             <div style={{ height: '6px', background: 'rgba(255,255,255,0.1)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -60,7 +65,7 @@ const RiskCard = ({ riskData }) => {
                 style={{
                   height: '100%',
                   width: `${percent}%`,
-                  background: factor === 'weather' ? '#f43f5e' : (factor === 'port_congestion' ? '#f59e0b' : '#3a86ff'),
+                  background: factor.toLowerCase().includes('weather') ? '#f43f5e' : (factor.toLowerCase().includes('port') ? '#f59e0b' : '#3a86ff'),
                   borderRadius: '3px',
                   transition: 'width 0.6s ease'
                 }}

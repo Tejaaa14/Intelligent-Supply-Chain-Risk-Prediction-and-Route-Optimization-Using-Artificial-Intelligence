@@ -51,13 +51,33 @@ def _get_shipment_features(db: Session, shipment_id: str):
     """
     shipment = crud.get_shipment(db, shipment_id)
     
+    # If no shipment found by shipment_id, try by vessel_id
+    if not shipment:
+        from app.database import models as _m
+        shipment = db.query(_m.Shipment).filter(
+            _m.Shipment.vessel_id == shipment_id,
+            _m.Shipment.status == "IN_TRANSIT"
+        ).first()
+    
+    # Also try to look up the vessel directly
+    vessel = None
+    if shipment and shipment.vessel:
+        vessel = shipment.vessel
+    if not vessel:
+        vessel = crud.get_vessel(db, shipment_id)
+    
     # Get vessel data
     vessel_speed = 18.0
     vessel_lat = 17.385
     vessel_lon = 113.486
     destination = "Singapore"
     
-    if shipment and shipment.vessel:
+    if vessel:
+        vessel_speed = vessel.speed or 18.0
+        vessel_lat = vessel.current_latitude or vessel_lat
+        vessel_lon = vessel.current_longitude or vessel_lon
+        destination = vessel.destination or destination
+    elif shipment and shipment.vessel:
         vessel_speed = shipment.vessel.speed or 18.0
         vessel_lat = shipment.vessel.current_latitude or vessel_lat
         vessel_lon = shipment.vessel.current_longitude or vessel_lon
@@ -156,14 +176,35 @@ def get_risk_prediction(shipment_id: str, db: Session = Depends(database.get_db)
     result = risk_model.predict_risk(features)
     now = datetime.datetime.utcnow()
 
-    # Resolve vessel/shipment names
+    # Resolve vessel/shipment names — try shipment first, then direct vessel lookup
     shipment = crud.get_shipment(db, shipment_id)
+    if not shipment:
+        from app.database import models as _m
+        shipment = db.query(_m.Shipment).filter(
+            _m.Shipment.vessel_id == shipment_id,
+            _m.Shipment.status == "IN_TRANSIT"
+        ).first()
+
+    vessel = None
     vessel_name = "Unknown"
     if shipment and shipment.vessel:
-        vessel_name = shipment.vessel.vessel_name
+        vessel = shipment.vessel
+        vessel_name = vessel.vessel_name or vessel_name
+    if not vessel:
+        vessel = crud.get_vessel(db, shipment_id)
+        if vessel:
+            vessel_name = vessel.vessel_name or vessel_name
 
     result["shipment_id"] = shipment_id
     result["vessel_name"] = vessel_name
+    result["vessel_id"] = vessel.vessel_id if vessel else shipment_id
+    result["vessel_status"] = vessel.status if vessel else "UNKNOWN"
+    result["vessel_destination"] = vessel.destination if vessel else "Unknown"
+    result["vessel_eta"] = vessel.eta if vessel else None
+    result["vessel_latitude"] = vessel.current_latitude if vessel else None
+    result["vessel_longitude"] = vessel.current_longitude if vessel else None
+    result["vessel_speed"] = vessel.speed if vessel else None
+    result["vessel_heading"] = vessel.heading if vessel else None
     result["prediction_timestamp"] = now.isoformat()
     result["model_name"] = "RandomForest Classifier (sklearn)"
     result["model_type"] = "classification"
@@ -185,11 +226,25 @@ def get_delay_prediction(shipment_id: str, db: Session = Depends(database.get_db
     now = datetime.datetime.utcnow()
 
     shipment = crud.get_shipment(db, shipment_id)
+    if not shipment:
+        from app.database import models as _m
+        shipment = db.query(_m.Shipment).filter(
+            _m.Shipment.vessel_id == shipment_id,
+            _m.Shipment.status == "IN_TRANSIT"
+        ).first()
+
+    vessel = None
     vessel_name = "Unknown"
     original_eta = None
     if shipment and shipment.vessel:
-        vessel_name = shipment.vessel.vessel_name
-        original_eta = shipment.vessel.eta
+        vessel = shipment.vessel
+        vessel_name = vessel.vessel_name or vessel_name
+        original_eta = vessel.eta
+    if not vessel:
+        vessel = crud.get_vessel(db, shipment_id)
+        if vessel:
+            vessel_name = vessel.vessel_name or vessel_name
+            original_eta = vessel.eta
 
     pred_delay = result["predicted_delay_hours"]
 

@@ -74,3 +74,30 @@ def test_model_metrics():
     assert metrics.status_code == 200
     assert "risk_classification_model" in metrics.json()
     assert "delay_prediction_model" in metrics.json()
+
+def test_auth_flow():
+    # 1. Test /me unauthenticated
+    unauth_res = client.get("/api/auth/me")
+    assert unauth_res.status_code == 401
+
+    # 2. Test login with admin
+    login_res = client.post("/api/auth/login", json={"username": "admin", "password": "password123"})
+    assert login_res.status_code == 200
+    token = login_res.json()["access_token"]
+    assert token is not None
+    assert login_res.json()["user"]["role"] == "ADMIN"
+
+    # 3. Test /me authenticated
+    me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me_res.status_code == 200
+    assert me_res.json()["username"] == "Admin User"
+    assert me_res.json()["role"] == "ADMIN"
+
+    # 4. Test logout
+    logout_res = client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token}"})
+    assert logout_res.status_code == 200
+
+    # 5. Test /me after logout (should be revoked)
+    revoked_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert revoked_res.status_code == 401
+

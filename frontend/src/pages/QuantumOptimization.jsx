@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { getVessels, getQuantumStatus, optimizeQuantumRoute, getQuantumResults, acceptRoute } from '../services/api';
 import { Compass, Cpu, Settings, Activity, Clock, Target, PlayCircle, Layers, CheckCircle, GitCommit } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
-const QuantumOptimization = () => {
+const QuantumOptimization = ({ globalVesselId, setGlobalVesselId }) => {
   const [status, setStatus] = useState(null);
   const [jobId, setJobId] = useState(null);
   const [results, setResults] = useState(null);
@@ -12,7 +12,7 @@ const QuantumOptimization = () => {
 
   const [vessels, setVessels] = useState([]);
   const [demoShipment, setDemoShipment] = useState({
-    shipment_id: "VESSEL_001",
+    shipment_id: globalVesselId || "VESSEL_001",
     origin: "Shanghai",
     destination: "Singapore",
     vessel_speed: 18.5,
@@ -20,12 +20,29 @@ const QuantumOptimization = () => {
   });
 
   useEffect(() => {
+    if (globalVesselId && globalVesselId !== demoShipment.shipment_id) {
+      const selectedVessel = vessels.find(v => v.vessel_id === globalVesselId);
+      if (selectedVessel) {
+        setDemoShipment(prev => ({
+          ...prev,
+          shipment_id: globalVesselId,
+          destination: selectedVessel.destination || 'Singapore',
+          vessel_speed: selectedVessel.speed || 18.5
+        }));
+      } else {
+        setDemoShipment(prev => ({ ...prev, shipment_id: globalVesselId }));
+      }
+    }
+  }, [globalVesselId, vessels]);
+
+  useEffect(() => {
     fetchQuantumStatus();
-    import('../services/api').then(m => m.getVessels().then(setVessels).catch(() => {}));
+    getVessels().then(setVessels).catch(() => {});
   }, []);
 
   const handleVesselChange = (e) => {
     const vId = e.target.value;
+    if (setGlobalVesselId) setGlobalVesselId(vId);
     const selectedVessel = vessels.find(v => v.vessel_id === vId);
     if (selectedVessel) {
       setDemoShipment({
@@ -40,8 +57,8 @@ const QuantumOptimization = () => {
 
   const fetchQuantumStatus = async () => {
     try {
-      const res = await axios.get('http://localhost:8000/api/quantum/status');
-      setStatus(res.data);
+      const data = await getQuantumStatus();
+      setStatus(data);
     } catch (err) {
       setError('Quantum backend unreachable.');
     }
@@ -54,10 +71,10 @@ const QuantumOptimization = () => {
     setJobId(null);
     
     try {
-      const res = await axios.post('http://localhost:8000/api/quantum/optimize', demoShipment);
-      if (res.data && res.data.job_id) {
-        setJobId(res.data.job_id);
-        pollResults(res.data.job_id);
+      const data = await optimizeQuantumRoute(demoShipment);
+      if (data && data.job_id) {
+        setJobId(data.job_id);
+        pollResults(data.job_id);
       }
     } catch (err) {
       setError('Failed to start quantum optimization.');
@@ -67,11 +84,11 @@ const QuantumOptimization = () => {
 
   const pollResults = async (id) => {
     try {
-      const res = await axios.get(`http://localhost:8000/api/quantum/results/${id}`);
-      if (res.data.status === 'COMPLETED') {
-        setResults(res.data);
+      const data = await getQuantumResults(id);
+      if (data.status === 'COMPLETED') {
+        setResults(data);
         setLoading(false);
-      } else if (res.data.status === 'FAILED') {
+      } else if (data.status === 'FAILED') {
         setError('Quantum job failed.');
         setLoading(false);
       } else {
@@ -217,6 +234,29 @@ const QuantumOptimization = () => {
             <GitCommit size={14} /> Circuit Depth: <span style={{ color: '#fff', fontWeight: 'bold' }}>{comp.circuit_depth}</span>
           </div>
         </div>
+
+        <button 
+          onClick={async () => {
+            try {
+              setLoading(true);
+              await acceptRoute({
+                vessel_id: demoShipment.shipment_id,
+                route_id: comp.best_route_quantum_id,
+                method: "QAOA Quantum Simulation"
+              });
+              alert(`Quantum Route ${comp.best_route_quantum} successfully accepted and alerts resolved!`);
+            } catch (e) {
+              alert("Failed to accept route.");
+            } finally {
+              setLoading(false);
+            }
+          }}
+          style={{
+            marginTop: '20px', width: '100%', padding: '12px', borderRadius: '8px', border: 'none', background: 'linear-gradient(135deg, #00d2ff, #3a86ff)', color: 'white', fontWeight: 'bold', cursor: 'pointer'
+          }}
+        >
+          Accept Quantum Recommended Route
+        </button>
       </div>
     );
   };

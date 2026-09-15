@@ -8,7 +8,7 @@ load_dotenv()
 
 from contextlib import asynccontextmanager
 from app.database.database import engine, Base, SessionLocal
-from app.api import vessels, weather, ports, news, routes, predictions, alerts, dashboard, health, whatif, audit, quantum, scenario
+from app.api import auth, vessels, weather, ports, news, routes, predictions, alerts, dashboard, health, whatif, audit, quantum, scenario
 from app.services.simulation_service import SimulationEngine
 from app.services.ais_service import ais_service_instance
 from scripts.seed_demo_data import seed_data
@@ -59,6 +59,7 @@ app.add_middleware(
 )
 
 # Include API Routers
+app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(vessels.router)
 app.include_router(weather.router)

@@ -2,35 +2,46 @@ import React, { useState, useEffect } from 'react';
 import RouteComparison from '../components/RouteComparison';
 import ExplanationPanel from '../components/ExplanationPanel';
 import Map from '../components/Map';
-import { optimizeRoutes, getExplanation, getVessels, getPorts } from '../services/api';
+import { optimizeRoutes, getExplanation, getVessels, getPorts, acceptRoute } from '../services/api';
 import { Compass, Sliders, Play, CheckCircle, AlertTriangle } from 'lucide-react';
 
-const RouteOptimization = () => {
+const RouteOptimization = ({ globalVesselId, setGlobalVesselId }) => {
   const [origin, setOrigin] = useState('Shanghai');
   const [destination, setDestination] = useState('Singapore');
-  const [vesselId, setVesselId] = useState('VESSEL_001');
-  
-  const handleVesselChange = (e) => {
-    const vId = e.target.value;
-    setVesselId(vId);
-    const selectedVessel = vessels.find(v => v.vessel_id === vId);
-    if (selectedVessel) {
-      if (selectedVessel.destination) setDestination(selectedVessel.destination);
-      // For origin, backend uses current location usually, but we'll set a default or previous
-      setOrigin('Shanghai'); // Or if selectedVessel.origin exists, use that.
-    }
-  };
+  const [vesselId, setVesselId] = useState(globalVesselId || 'VESSEL_001');
   const [routes, setRoutes] = useState([]);
   const [recommendedId, setRecommendedId] = useState('');
+  const [selectedRouteId, setSelectedRouteId] = useState('');
   const [explanation, setExplanation] = useState(null);
   const [vessels, setVessels] = useState([]);
   const [ports, setPorts] = useState([]);
+  const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
 
   // Weights state
   const [wRisk, setWRisk] = useState(0.25);
   const [wCost, setWCost] = useState(0.25);
   const [wDelay, setWDelay] = useState(0.20);
+
+  useEffect(() => {
+    if (globalVesselId && globalVesselId !== vesselId) {
+      setVesselId(globalVesselId);
+      // Update destination if possible
+      const selectedVessel = vessels.find(v => v.vessel_id === globalVesselId);
+      if (selectedVessel && selectedVessel.destination) setDestination(selectedVessel.destination);
+    }
+  }, [globalVesselId, vessels]);
+
+  const handleVesselChange = (e) => {
+    const vId = e.target.value;
+    setVesselId(vId);
+    if (setGlobalVesselId) setGlobalVesselId(vId);
+    const selectedVessel = vessels.find(v => v.vessel_id === vId);
+    if (selectedVessel) {
+      if (selectedVessel.destination && selectedVessel.destination !== 'N/A') setDestination(selectedVessel.destination);
+      if (selectedVessel.origin && selectedVessel.origin !== 'N/A') setOrigin(selectedVessel.origin);
+    }
+  };
 
   const runOptimization = async () => {
     try {
@@ -58,8 +69,9 @@ const RouteOptimization = () => {
 
       setRoutes(res.candidate_routes || []);
       setRecommendedId(res.recommended_route);
+      setSelectedRouteId(res.recommended_route);
 
-      const xai = await getExplanation('SHIP_001');
+      const xai = await getExplanation(vesselId);
       setExplanation(xai);
     } catch (err) {
       console.error(err);
@@ -73,10 +85,43 @@ const RouteOptimization = () => {
       const [vList, pList] = await Promise.all([getVessels(), getPorts()]);
       setVessels(vList);
       setPorts(pList);
+      // Fetch events for map overlay
+      try {
+        const { getGeopoliticalNews } = await import('../services/api');
+        const evts = await getGeopoliticalNews();
+        setEvents(evts || []);
+      } catch (_) {}
       runOptimization();
     };
     init();
   }, []);
+
+  // Compute the routes to pass to the map — highlight selected, show all
+  const mapRoutes = routes.map(rt => ({
+    ...rt,
+    is_recommended: rt.route_id === selectedRouteId
+  }));
+
+  const handleSelectRoute = async (rt) => {
+    try {
+      setLoading(true);
+      // Update visual selection immediately
+      setSelectedRouteId(rt.route_id);
+      setRecommendedId(rt.route_id);
+
+      await acceptRoute({
+        vessel_id: vesselId,
+        route_id: rt.route_id,
+        method: "Dijkstra (Classical)"
+      });
+      alert(`Route ${rt.route_name} successfully accepted and alerts resolved!`);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to accept route.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -178,11 +223,11 @@ const RouteOptimization = () => {
 
       {/* Map visualization of candidate paths */}
       <div className="glass-card" style={{ padding: '16px', height: '420px' }}>
-        <Map vessels={vessels} ports={ports} routes={routes} />
+        <Map vessels={vessels} ports={ports} routes={mapRoutes} events={events} selectedVesselId={vesselId} />
       </div>
 
       {/* Route Candidate Cards Grid */}
-      <RouteComparison routes={routes} recommendedRouteId={recommendedId} />
+      <RouteComparison routes={routes} recommendedRouteId={recommendedId} onSelectRoute={handleSelectRoute} />
 
       {/* XAI Explanation Panel */}
       <ExplanationPanel explanationData={explanation} />

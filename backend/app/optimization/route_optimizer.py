@@ -15,7 +15,9 @@ class RouteOptimizer:
         vessel_speed: float = 18.0,
         fuel_price: float = 630.0,
         weights: Dict[str, float] = None,
-        live_disruptions: Dict[str, float] = None
+        live_disruptions: Dict[str, float] = None,
+        vessel_lat: float = None,
+        vessel_lon: float = None
     ) -> Dict[str, Any]:
         """
         Multi-criteria Dijkstra / A* route solver.
@@ -107,6 +109,15 @@ class RouteOptimizer:
                     total_time += edge_data.get("distance", 0.0) / vessel_speed
                     total_risk_sum += edge_data.get("computed_risk", 20.0)
                     total_delay_sum += edge_data.get("computed_delay", 1.0)
+
+            # Prepend vessel's current position as the starting waypoint
+            if vessel_lat is not None and vessel_lon is not None:
+                waypoints.insert(0, {
+                    "node_id": "VESSEL_POS",
+                    "name": "Current Vessel Position",
+                    "lat": vessel_lat,
+                    "lon": vessel_lon
+                })
 
             avg_risk = round(min(98.0, max(10.0, total_risk_sum / max(1, len(path)-1))), 1)
             pred_delay = round(total_delay_sum, 1)

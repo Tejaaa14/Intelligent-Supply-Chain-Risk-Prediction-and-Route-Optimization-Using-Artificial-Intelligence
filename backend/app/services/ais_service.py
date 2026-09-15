@@ -188,16 +188,6 @@ class AISService:
 
         self._vessels[mmsi] = vessel
 
-    def _compute_estimated_eta(self, lat: float, lon: float, dest: str, speed: float) -> str:
-        # Very rough estimation since we don't have actual dest coordinates easily without a full port db
-        # We assume 1000 nautical miles as a dummy distance for demonstration if destination is known
-        # In a real system, we'd look up the port coordinates.
-        if speed <= 0.5:
-            speed = 10.0 # avoid div by zero, assume avg speed
-        distance_nm = 1000.0 # dummy
-        hours = distance_nm / speed
-        eta_time = datetime.datetime.utcnow() + datetime.timedelta(hours=hours)
-        return eta_time.isoformat() + "|ESTIMATED"
 
     def get_all_vessels(self) -> List[Dict[str, Any]]:
         """Return vessels based on current mode — never silently fake data."""
@@ -208,12 +198,6 @@ class AISService:
         elif mode == "SIMULATION":
             vessels = self._get_simulated_vessels()
         
-        # Post-process to add estimated ETAs if destination is known but ETA is N/A
-        for v in vessels:
-            if v["eta"] == "N/A" and v["destination"] != "N/A" and v.get("latitude") and v.get("longitude"):
-                speed = v.get("speed") or 12.0
-                v["eta"] = self._compute_estimated_eta(v["latitude"], v["longitude"], v["destination"], speed)
-                
         return vessels
 
     def get_all_vessels_with_status(self) -> Dict[str, Any]:

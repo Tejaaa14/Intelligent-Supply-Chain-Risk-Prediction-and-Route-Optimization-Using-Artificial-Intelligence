@@ -3,7 +3,7 @@ import { getRiskPrediction, getDelayPrediction, getCostPrediction, getModelMetri
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { ShieldAlert, Cpu, AlertCircle, FileText, Clock, DollarSign, Database, Info } from 'lucide-react';
 
-const RiskAnalysis = () => {
+const RiskAnalysis = ({ globalVesselId, setGlobalVesselId }) => {
   const [riskData, setRiskData] = useState(null);
   const [delayData, setDelayData] = useState(null);
   const [costData, setCostData] = useState(null);
@@ -12,7 +12,7 @@ const RiskAnalysis = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [vessels, setVessels] = useState([]);
-  const [selectedVessel, setSelectedVessel] = useState('SHIP_001');
+  const [selectedVessel, setSelectedVessel] = useState(globalVesselId || '');
   const [metricsError, setMetricsError] = useState(false);
 
   // Fetch vessel list on mount
@@ -20,12 +20,20 @@ const RiskAnalysis = () => {
     getVessels()
       .then(vList => {
         setVessels(vList);
-        if (vList.length > 0 && !selectedVessel) {
-          setSelectedVessel(vList[0].shipment_id || 'SHIP_001');
+        if (vList.length > 0 && selectedVessel === '') {
+          const defaultVessel = vList[0].vessel_id;
+          setSelectedVessel(defaultVessel);
+          if (setGlobalVesselId && !globalVesselId) setGlobalVesselId(defaultVessel);
         }
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (globalVesselId && globalVesselId !== selectedVessel) {
+      setSelectedVessel(globalVesselId);
+    }
+  }, [globalVesselId]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -51,7 +59,9 @@ const RiskAnalysis = () => {
         setLoading(false);
       }
     };
-    loadData();
+    if (selectedVessel) {
+      loadData();
+    }
   }, [selectedVessel]);
 
   // Generate dynamic chart data from actual backend feature contributions
@@ -98,13 +108,15 @@ const RiskAnalysis = () => {
           <label style={{ fontSize: '0.78rem', color: '#94a3b8' }}>Vessel/Shipment:</label>
           <select
             value={selectedVessel}
-            onChange={(e) => setSelectedVessel(e.target.value)}
+            onChange={(e) => {
+              setSelectedVessel(e.target.value);
+              if (setGlobalVesselId) setGlobalVesselId(e.target.value);
+            }}
             style={{ padding: '6px 10px', background: 'rgba(15,23,42,0.8)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '8px', color: '#fff', fontSize: '0.85rem' }}
           >
-            <option value="SHIP_001">SHIP_001 (Default)</option>
             {vessels.map(v => (
-              <option key={v.vessel_id} value={v.shipment_id || v.vessel_id}>
-                {v.vessel_name} ({v.shipment_id || v.vessel_id})
+              <option key={v.vessel_id} value={v.vessel_id}>
+                {v.vessel_name} ({v.vessel_id})
               </option>
             ))}
           </select>
@@ -238,9 +250,9 @@ const RiskAnalysis = () => {
           <Cpu size={20} color="#00d2ff" /> Academic Model Performance Benchmarks
         </h3>
 
-        {metricsError && !metrics ? (
+        {metricsError || !metrics || !metrics.risk_classification_model?.training_samples ? (
           <div style={{ color: '#f59e0b', fontSize: '0.85rem', padding: '16px', background: 'rgba(245,158,11,0.1)', borderRadius: '8px', border: '1px solid rgba(245,158,11,0.3)' }}>
-            Model metrics could not be loaded. The model evaluation endpoint may be unavailable.
+            Model not trained / Insufficient evaluation data. The model evaluation endpoint may be unavailable or the dataset is empty.
           </div>
         ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>

@@ -46,10 +46,16 @@ def _get_delay_model():
 
 def _build_features_for_vessel(db: Session, vessel):
     """Build feature dict from LIVE services for a vessel."""
-    vessel_lat = vessel.current_latitude if vessel and vessel.current_latitude else 17.385
-    vessel_lon = vessel.current_longitude if vessel and vessel.current_longitude else 113.486
-    vessel_speed = vessel.speed if vessel and vessel.speed else 18.0
-    destination = vessel.destination if vessel and vessel.destination else "Singapore"
+    if isinstance(vessel, dict):
+        vessel_lat = vessel.get("latitude") or 17.385
+        vessel_lon = vessel.get("longitude") or 113.486
+        vessel_speed = vessel.get("speed") or 18.0
+        destination = vessel.get("destination") or "Singapore"
+    else:
+        vessel_lat = vessel.current_latitude if vessel and vessel.current_latitude else 17.385
+        vessel_lon = vessel.current_longitude if vessel and vessel.current_longitude else 113.486
+        vessel_speed = vessel.speed if vessel and vessel.speed else 18.0
+        destination = vessel.destination if vessel and vessel.destination else "Singapore"
 
     # LIVE: Weather
     weather_risk = 22.0
@@ -116,33 +122,46 @@ def _build_features_for_vessel(db: Session, vessel):
 
 @router.get("/summary")
 def get_dashboard_summary(db: Session = Depends(database.get_db)):
-    vessels = crud.get_vessels(db)
+    db_vessels = crud.get_vessels(db)
+    live_vessels = ais_service.get_all_vessels()
+    live_ids = {v["vessel_id"] for v in live_vessels}
+    
+    merged_vessels = list(live_vessels)
+    for v_db in db_vessels:
+        if v_db.vessel_id not in live_ids:
+            merged_vessels.append(v_db)
+            
     alerts = crud.get_alerts(db)
     now = datetime.datetime.utcnow()
 
-    active_vessels = len(vessels)
+    active_vessels = len(merged_vessels)
     active_alerts_count = len([a for a in alerts if not a.is_resolved])
 
-    # Dynamically compute risk and delay for each vessel
-    risk_model = _get_risk_model()
-    delay_model = _get_delay_model()
-
+    # Dynamically compute risk and delay from database
     risk_counts = {"LOW": 0, "MEDIUM": 0, "HIGH": 0, "CRITICAL": 0}
-    total_delay = 0.0
     high_risk_count = 0
+    total_delay = 0.0
+    delay_count = 0
+    
+    # Get latest risk predictions
+    from sqlalchemy import func
+    # Note: For simplicity, just get all risks and delays for active shipments
+    active_shipments = db.query(models.Shipment).filter(models.Shipment.status == "IN_TRANSIT").all()
+    
+    for shipment in active_shipments:
+        risk = db.query(models.RiskPrediction).filter(models.RiskPrediction.shipment_id == shipment.shipment_id).order_by(models.RiskPrediction.created_at.desc()).first()
+        if risk and risk.risk_level:
+            level = risk.risk_level
+            risk_counts[level] = risk_counts.get(level, 0) + 1
+            if level in ("HIGH", "CRITICAL"):
+                high_risk_count += 1
+                
+        delay = db.query(models.DelayPrediction).filter(models.DelayPrediction.shipment_id == shipment.shipment_id).order_by(models.DelayPrediction.created_at.desc()).first()
+        if delay and delay.predicted_delay_hours:
+            total_delay += delay.predicted_delay_hours
+            delay_count += 1
 
-    for v in vessels:
-        features = _build_features_for_vessel(db, v)
-        risk_res = risk_model.predict_risk(features)
-        delay_res = delay_model.predict_delay(features)
-
-        level = risk_res.get("risk_level", "LOW")
-        risk_counts[level] = risk_counts.get(level, 0) + 1
-        if level in ("HIGH", "CRITICAL"):
-            high_risk_count += 1
-        total_delay += delay_res.get("predicted_delay_hours", 0.0)
-
-    avg_delay = round(total_delay / max(1, active_vessels), 1)
+    avg_delay = round(total_delay / max(1, delay_count), 1)
 
     ais_mode = ais_service.get_data_source_mode()
     ais_conn = ais_service.get_connection_status()

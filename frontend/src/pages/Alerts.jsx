@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import AlertPanel from '../components/AlertPanel';
-import { getAlerts, optimizeRoutes, getAuditLogs } from '../services/api';
+import api, { getAlerts, optimizeRoutes, getAuditLogs } from '../services/api';
 import { Bell, ShieldAlert, History, CheckCircle } from 'lucide-react';
 
 const Alerts = () => {
@@ -34,7 +34,6 @@ const Alerts = () => {
 
       // Log explicit reroute audit entry
       try {
-        const api = (await import('../services/api')).default;
         await api.post('/audit', null, { params: {
           user: 'logistics_manager',
           action: 'REROUTE_FROM_ALERT',

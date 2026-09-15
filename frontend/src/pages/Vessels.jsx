@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import VesselTable from '../components/VesselTable';
 import Map from '../components/Map';
-import { getVessels, getVesselDetails, getWeatherForVessel } from '../services/api';
+import { getVessels, getVesselDetails, getWeatherForVessel, getGeopoliticalNews } from '../services/api';
 import { Ship, Navigation, Wind, Eye, Compass, Anchor } from 'lucide-react';
 
-const Vessels = () => {
+const Vessels = ({ globalVesselId, setGlobalVesselId }) => {
   const [vessels, setVessels] = useState([]);
-  const [selectedId, setSelectedId] = useState('VESSEL_001');
+  const [selectedId, setSelectedId] = useState(globalVesselId || '');
   const [vesselDetail, setVesselDetail] = useState(null);
   const [weather, setWeather] = useState(null);
+  const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -16,15 +17,32 @@ const Vessels = () => {
       try {
         const vList = await getVessels();
         setVessels(vList);
-        if (vList.length > 0 && !selectedId) {
-          setSelectedId(vList[0].vessel_id);
+        if (vList.length > 0 && selectedId === '') {
+          const defaultVessel = vList[0].vessel_id;
+          setSelectedId(defaultVessel);
+          if (setGlobalVesselId && !globalVesselId) setGlobalVesselId(defaultVessel);
         }
       } catch (err) {
         console.error(err);
       }
     };
     fetchVessels();
+    // Fetch geopolitical events for map
+    getGeopoliticalNews()
+      .then(evts => setEvents(evts || []))
+      .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (globalVesselId && globalVesselId !== selectedId) {
+      setSelectedId(globalVesselId);
+    }
+  }, [globalVesselId]);
+
+  const handleSelectVessel = (id) => {
+    setSelectedId(id);
+    if (setGlobalVesselId) setGlobalVesselId(id);
+  };
 
   useEffect(() => {
     if (!selectedId) return;
@@ -32,11 +50,11 @@ const Vessels = () => {
       try {
         setLoading(true);
         const [det, w] = await Promise.all([
-          getVesselDetails(selectedId),
-          getWeatherForVessel(selectedId)
+          getVesselDetails(selectedId).catch(e => { console.error("Vessel details error", e); return null; }),
+          getWeatherForVessel(selectedId).catch(e => { console.error("Weather error", e); return null; })
         ]);
-        setVesselDetail(det);
-        setWeather(w);
+        if (det) setVesselDetail(det);
+        if (w) setWeather(w);
       } catch (err) {
         console.error(err);
       } finally {
@@ -116,11 +134,11 @@ const Vessels = () => {
 
         {/* Right Side: Map showing selected vessel path */}
         <div className="glass-card" style={{ padding: '16px', height: '520px' }}>
-          <Map vessels={vesselDetail ? [vesselDetail] : vessels} />
+          <Map vessels={vessels} selectedVesselId={selectedId} events={events} />
         </div>
       </div>
 
-      <VesselTable vessels={vessels} selectedVesselId={selectedId} onSelectVessel={setSelectedId} />
+      <VesselTable vessels={vessels} selectedVesselId={selectedId} onSelectVessel={handleSelectVessel} />
     </div>
   );
 };

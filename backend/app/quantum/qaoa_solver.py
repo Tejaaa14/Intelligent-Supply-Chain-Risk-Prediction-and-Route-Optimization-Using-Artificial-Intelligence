@@ -61,7 +61,7 @@ class QAOASolver:
         # Extract measurement distribution (approximate from samples if available)
         # For MinimumEigenOptimizer with exact/sampler, we might just get the best.
         # We will synthesize a plausible distribution for the demo based on the objective values.
-        measurements = self._generate_synthetic_distribution(qubo, result.x)
+        measurements = self._extract_distribution_from_result(result)
 
         return {
             "selected_index": selected_index,
@@ -75,32 +75,25 @@ class QAOASolver:
             "optimizer": "COBYLA"
         }
         
-    def _generate_synthetic_distribution(self, qubo: QuadraticProgram, best_x) -> List[Dict[str, Any]]:
+    def _extract_distribution_from_result(self, result) -> List[Dict[str, Any]]:
         """
-        Generates a measurement distribution visualization for the frontend.
-        Since qiskit_optimization abstracts away the raw counts in its return object,
-        we build a representative distribution showing the best bitstring with highest prob.
+        Extracts the measurement distribution from the QAOA result samples.
         """
-        n = qubo.get_num_vars()
         measurements = []
-        
-        # Generate some basis states
-        best_str = "".join([str(int(x)) for x in best_x])
-        measurements.append({"bitstring": best_str, "probability": 0.45})
-        
-        # Add some noise states
-        import random
-        random.seed(42) # deterministic for demo
-        remaining_prob = 0.55
-        
-        for i in range(min(5, 2**n - 1)):
-            # Generate a random binary string of length n
-            rand_str = "".join([str(random.randint(0, 1)) for _ in range(n)])
-            if rand_str != best_str:
-                prob = random.uniform(0.05, remaining_prob)
-                measurements.append({"bitstring": rand_str, "probability": round(prob, 3)})
-                remaining_prob -= prob
-                if remaining_prob <= 0:
-                    break
-                    
+        if hasattr(result, "samples") and result.samples:
+            for sample in result.samples:
+                bitstring = "".join([str(int(x)) for x in sample.x])
+                measurements.append({
+                    "bitstring": bitstring,
+                    "probability": sample.probability
+                })
+        else:
+            measurements = [{"bitstring": "".join([str(int(x)) for x in result.x]), "probability": 1.0}]
+            
+        # Normalize probabilities
+        total_prob = sum(m["probability"] for m in measurements)
+        if total_prob > 0:
+            for m in measurements:
+                m["probability"] = round(m["probability"] / total_prob, 4)
+                
         return sorted(measurements, key=lambda x: x["probability"], reverse=True)

@@ -56,7 +56,47 @@ class QuantumRouteOptimizer:
                 live_disruptions=live_disruptions
             )
             candidate_routes = classical_result["candidate_routes"]
-            
+            # Rewrite route IDs to be unique and save to DB
+            from app.database import models
+            shipment = self.db.query(models.Shipment).filter(models.Shipment.shipment_id == shipment_id).first()
+            if not shipment:
+                # Auto-create shipment for this vessel if it doesn't exist
+                shipment = models.Shipment(
+                    shipment_id=shipment_id,
+                    vessel_id=shipment_id,
+                    origin=origin,
+                    destination=destination,
+                    status="IN_TRANSIT"
+                )
+                self.db.add(shipment)
+                self.db.commit()
+                self.db.refresh(shipment)
+                
+            if shipment:
+                self.db.query(models.RouteOption).filter(models.RouteOption.shipment_id == shipment.shipment_id).delete()
+                for rt in candidate_routes:
+                    rt["route_id"] = f"{shipment.shipment_id}_{rt['route_id']}_{uuid.uuid4().hex[:4]}"
+                    db_route = models.RouteOption(
+                        route_id=rt["route_id"],
+                        shipment_id=shipment.shipment_id,
+                        route_name=rt["route_name"],
+                        origin=rt["origin"],
+                        destination=rt["destination"],
+                        waypoints_json=rt["waypoints"],
+                        distance_nautical_miles=rt["distance_nautical_miles"],
+                        travel_time_hours=rt["travel_time_hours"],
+                        fuel_cost=rt["estimated_total_cost"],
+                        weather_risk=rt["risk_score"],
+                        congestion_risk=0,
+                        geopolitical_risk=0,
+                        total_risk_score=rt["risk_score"],
+                        predicted_delay_hours=rt["predicted_delay_hours"],
+                        estimated_total_cost=rt["estimated_total_cost"],
+                        is_recommended=False # will be updated by quantum
+                    )
+                    self.db.add(db_route)
+                self.db.commit()
+
             # 3. QUBO Formulation
             qp = self.qubo_builder.build_qubo_from_candidates(candidate_routes)
             
@@ -81,7 +121,9 @@ class QuantumRouteOptimizer:
             comparison = {
                 "algorithms": ["Dijkstra (Classical)", "QAOA (Quantum Simulator)"],
                 "best_route_classical": classical_result["recommended_route_name"],
+                "best_route_classical_id": classical_result["recommended_route"],
                 "best_route_quantum": recommended_route["route_name"],
+                "best_route_quantum_id": recommended_route["route_id"],
                 "execution_time_ms": {
                     "classical": classical_time_ms,
                     "quantum": execution_time_ms

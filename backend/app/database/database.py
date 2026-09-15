@@ -7,12 +7,15 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./supply_chain.db")
 
+from sqlalchemy.pool import NullPool
+
 # SQLite needs connect_args for multithreading
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_engine(
     DATABASE_URL,
     connect_args=connect_args,
+    poolclass=NullPool,
     echo=False
 )
 

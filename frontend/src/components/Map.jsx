@@ -1,8 +1,9 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, GeoJSON, useMap, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, GeoJSON, useMap, Tooltip, ZoomControl } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { Layers } from 'lucide-react';
 import countryGeoJson from '../assets/countries.json';
 
 // Fix default leaflet icon issue
@@ -14,9 +15,14 @@ L.Icon.Default.mergeOptions({
 });
 
 // Markers
-const createVesselIcon = (color = '#00d2ff') => {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${color}" width="28" height="28" style="filter: drop-shadow(0 0 6px ${color});"><path d="M2 19.5c0 0 3-1 10-1s10 1 10 1v.5c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2v-.5zm2-3.5h16l-1.5-6H5.5L4 16zm4-7.5V4h8v4.5h-8z"/></svg>`;
-  return L.divIcon({ html: svg, className: 'custom-vessel-icon', iconSize: [28, 28], iconAnchor: [14, 14] });
+const createVesselIcon = (color = '#00d2ff', isSelected = false) => {
+  const size = isSelected ? 36 : 28;
+  const stroke = isSelected ? `<circle cx="12" cy="12" r="11" stroke="#f43f5e" stroke-width="2" fill="none" />` : '';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="${color}" width="${size}" height="${size}" style="filter: drop-shadow(0 0 ${isSelected ? '10px' : '6px'} ${color});">
+    ${stroke}
+    <path d="M2 19.5c0 0 3-1 10-1s10 1 10 1v.5c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2v-.5zm2-3.5h16l-1.5-6H5.5L4 16zm4-7.5V4h8v4.5h-8z"/>
+  </svg>`;
+  return L.divIcon({ html: svg, className: 'custom-vessel-icon', iconSize: [size, size], iconAnchor: [size/2, size/2] });
 };
 
 const createEventIcon = () => {
@@ -34,12 +40,15 @@ const MAP_THEMES = {
 
 const WORLD_BOUNDS = L.latLngBounds(L.latLng(-85, -180), L.latLng(85, 180));
 
-// Auto-fitter Component
+// Auto-fitter Component — only runs on initial mount to set initial view
 const MapBoundsFitter = ({ vessels, ports, routes, events }) => {
   const map = useMap();
+  const hasFitted = React.useRef(false);
   useEffect(() => {
     // Fix tile rendering: invalidate size after layout settles
     setTimeout(() => map.invalidateSize(), 200);
+
+    if (hasFitted.current) return;
 
     let points = [];
     if (vessels?.length) vessels.forEach(v => { if (v.latitude && v.longitude) points.push([v.latitude, v.longitude]); });
@@ -50,16 +59,31 @@ const MapBoundsFitter = ({ vessels, ports, routes, events }) => {
     if (points.length > 0) {
       const bounds = L.latLngBounds(points);
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+      hasFitted.current = true;
     }
   }, [vessels, ports, routes, events, map]);
   return null;
 };
 
-const Map = ({ vessels = [], ports = [], routes = [], weatherZones = [], events = [], systemHealth = null }) => {
+// FlyToVessel — smoothly pan/zoom to the selected vessel when selection changes
+const FlyToVessel = ({ vessels, selectedVesselId }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (!selectedVesselId || !vessels?.length) return;
+    const v = vessels.find(vsl => vsl.vessel_id === selectedVesselId);
+    if (v && v.latitude && v.longitude) {
+      map.flyTo([v.latitude, v.longitude], 10, { duration: 1.2 });
+    }
+  }, [selectedVesselId, vessels, map]);
+  return null;
+};
+
+const Map = ({ vessels = [], ports = [], routes = [], weatherZones = [], events = [], systemHealth = null, selectedVesselId = null }) => {
   const defaultCenter = [18.0, 115.0];
   const stableGeoJson = useMemo(() => countryGeoJson, []);
 
   const [theme, setTheme] = useState('Dark Maritime');
+  const [showThemes, setShowThemes] = useState(false);
   const [layers, setLayers] = useState({
     vessels: true,
     ports: true,
@@ -82,26 +106,12 @@ const Map = ({ vessels = [], ports = [], routes = [], weatherZones = [], events 
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      {/* Top Absolute UI */}
-      <div style={{ position: 'absolute', top: 10, left: 10, right: 10, zIndex: 1000, display: 'flex', justifyContent: 'space-between', pointerEvents: 'none' }}>
-        
-        {/* Removed left counters block as requested */}
-
-        {/* Right: Data Status */}
-        <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', color: '#f8fafc', fontSize: '0.75rem', pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '140px', whiteSpace: 'nowrap' }}>
-          <div style={{ fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '4px', marginBottom: '2px' }}>DATA STATUS</div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}><span>AIS:</span> <strong style={{ color: systemHealth?.AIS === 'OK' ? '#10b981' : '#f59e0b' }}>{systemHealth?.AIS === 'OK' ? 'LIVE' : (systemHealth?.AIS || 'LIVE')}</strong></div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}><span>Weather:</span> <strong style={{ color: '#10b981' }}>LIVE</strong></div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}><span>News:</span> <strong style={{ color: '#10b981' }}>LIVE</strong></div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}><span>Ports:</span> <strong style={{ color: '#3b82f6' }}>PUBLIC</strong></div>
-          {isSimulation && <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px', paddingTop: '4px', borderTop: '1px solid rgba(255,255,255,0.1)' }}><span style={{ color: '#f43f5e', fontWeight: 'bold' }}>SIMULATION:</span> <strong style={{ color: '#f43f5e' }}>ON</strong></div>}
-        </div>
-      </div>
-
       <MapContainer
         center={defaultCenter}
         zoom={4}
         minZoom={2}
+        zoomControl={false}
+        attributionControl={false}
         maxZoom={18}
         maxBounds={WORLD_BOUNDS}
         maxBoundsViscosity={1.0}
@@ -114,6 +124,7 @@ const Map = ({ vessels = [], ports = [], routes = [], weatherZones = [], events 
         />
         <GeoJSON data={stableGeoJson} style={countryBorderStyle} />
         <MapBoundsFitter vessels={layers.vessels ? vessels : []} ports={layers.ports ? ports : []} routes={layers.routes ? routes : []} events={layers.events ? events : []} />
+        <FlyToVessel vessels={vessels} selectedVesselId={selectedVesselId} />
 
         {/* Ports */}
         {layers.ports && ports.map((port) => (
@@ -215,11 +226,12 @@ const Map = ({ vessels = [], ports = [], routes = [], weatherZones = [], events 
             {vessels.map((vessel) => {
               if (!vessel.latitude || !vessel.longitude) return null;
               // Color based on risk/status conceptually (yellow if delayed/high risk, blue normal)
+              const isSelected = vessel.vessel_id === selectedVesselId;
               const isHighRisk = vessel.status === 'DELAYED' || vessel.status === 'WAITING';
-              const color = isHighRisk ? '#f59e0b' : '#00d2ff';
+              const color = isSelected ? '#f43f5e' : (isHighRisk ? '#f59e0b' : '#00d2ff');
               
               return (
-                <Marker key={`vsl_${vessel.vessel_id}`} position={[vessel.latitude, vessel.longitude]} icon={createVesselIcon(color)}>
+                <Marker key={`vsl_${vessel.vessel_id}`} position={[vessel.latitude, vessel.longitude]} icon={createVesselIcon(color, isSelected)}>
                   <Tooltip>{vessel.vessel_name} ({vessel.vessel_type})</Tooltip>
                   <Popup>
                     <div style={{ fontSize: '0.85rem', minWidth: '200px' }}>
@@ -253,24 +265,110 @@ const Map = ({ vessels = [], ports = [], routes = [], weatherZones = [], events 
           </MarkerClusterGroup>
         )}
 
-        {/* Bottom Left Controls: Theme & Layers */}
-        <div style={{ position: 'absolute', bottom: 20, left: 20, zIndex: 1000, display: 'flex', gap: '12px' }}>
-          
-          {/* Map Theme Selector */}
-          <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', color: '#f8fafc', fontSize: '0.8rem' }}>
-            <div style={{ fontWeight: 'bold', marginBottom: '6px', color: '#00d2ff' }}>MAP THEME</div>
-            <select value={theme} onChange={(e) => setTheme(e.target.value)} style={{ background: 'rgba(0,0,0,0.5)', color: 'white', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '4px', padding: '4px 6px', fontSize: '0.8rem', width: '100%' }}>
-              {Object.keys(MAP_THEMES).map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
+        <ZoomControl position="bottomright" />
 
+        {/* Custom style to make zoom controls match the glass UI panel */}
+        <style>{`
+          .leaflet-control-zoom {
+            border: none !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+            margin-right: 10px !important;
+            margin-bottom: 20px !important;
+          }
+          .leaflet-control-zoom a {
+            background: rgba(15, 23, 42, 0.85) !important;
+            backdrop-filter: blur(8px) !important;
+            color: #00d2ff !important;
+            border: 1px solid rgba(255,255,255,0.2) !important;
+            width: 38px !important;
+            height: 38px !important;
+            line-height: 38px !important;
+            transition: all 0.2s ease;
+          }
+          .leaflet-control-zoom a:first-child {
+            border-bottom: none !important;
+            border-top-left-radius: 8px !important;
+            border-top-right-radius: 8px !important;
+          }
+          .leaflet-control-zoom a:last-child {
+            border-bottom-left-radius: 8px !important;
+            border-bottom-right-radius: 8px !important;
+          }
+          .leaflet-control-zoom a:hover {
+            background: rgba(30, 41, 59, 0.95) !important;
+            color: #fff !important;
+            border-color: #00d2ff !important;
+          }
+        `}</style>
+
+        {/* Bottom Right Theme Control */}
+        <div style={{ position: 'absolute', bottom: 130, right: 10, zIndex: 1000, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+          {showThemes && (
+            <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+              {Object.keys(MAP_THEMES).map(t => {
+                // Background image logic
+                const bgImage = t.includes('Dark') ? 'url(https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=150&q=80)' : 
+                                t.includes('Light') ? 'url(https://images.unsplash.com/photo-1569336415962-a4bd9f69cd83?auto=format&fit=crop&w=150&q=80)' :
+                                t === 'Satellite' ? 'url(https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=150&q=80)' :
+                                'url(https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=150&q=80)';
+                
+                return (
+                  <div 
+                    key={t}
+                    onClick={() => { setTheme(t); setShowThemes(false); }}
+                    style={{ 
+                      width: '68px', height: '68px', 
+                      backgroundImage: bgImage,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                      position: 'relative',
+                      border: theme === t ? '2px solid #00d2ff' : '1px solid rgba(255,255,255,0.2)',
+                      borderRadius: '8px', 
+                      cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+                      fontSize: '0.65rem', color: '#fff', fontWeight: 'bold',
+                      textShadow: '0 2px 4px rgba(0,0,0,0.8)',
+                      transition: 'all 0.2s ease',
+                      overflow: 'hidden'
+                    }}
+                  >
+                    <div style={{ position: 'absolute', inset: 0, background: theme === t ? 'rgba(0, 210, 255, 0.2)' : 'rgba(0,0,0,0.4)', transition: 'all 0.2s ease' }} />
+                    <span style={{ position: 'relative', zIndex: 1, padding: '0 4px' }}>{t}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <button 
+            onClick={() => setShowThemes(!showThemes)}
+            style={{ 
+              background: 'rgba(15, 23, 42, 0.85)', 
+              backdropFilter: 'blur(8px)',
+              border: '2px solid rgba(255,255,255,0.2)', 
+              color: '#00d2ff', 
+              width: '44px', height: '44px', 
+              borderRadius: '8px', 
+              cursor: 'pointer', 
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.borderColor = '#00d2ff'; e.currentTarget.style.transform = 'scale(1.05)'; }}
+            onMouseOut={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.transform = 'scale(1)'; }}
+          >
+            <Layers size={22} />
+          </button>
+        </div>
+
+        {/* Bottom Left Controls: Layers & Legend */}
+        <div style={{ position: 'absolute', bottom: 10, left: 10, zIndex: 1000, display: 'flex', gap: '8px' }}>
           {/* Map Layers */}
-          <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', color: '#f8fafc', fontSize: '0.8rem' }}>
-            <div style={{ fontWeight: 'bold', marginBottom: '6px', color: '#00d2ff' }}>MAP LAYERS</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', padding: '8px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)', color: '#f8fafc', fontSize: '0.7rem' }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '4px', color: '#00d2ff' }}>LAYERS</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               {Object.keys(layers).map(layer => (
-                <label key={layer} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', textTransform: 'capitalize' }}>
-                  <input type="checkbox" checked={layers[layer]} onChange={() => setLayers(prev => ({...prev, [layer]: !prev[layer]}))} />
+                <label key={layer} style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', textTransform: 'capitalize' }}>
+                  <input type="checkbox" checked={layers[layer]} onChange={() => setLayers(prev => ({...prev, [layer]: !prev[layer]}))} style={{ margin: 0 }} />
                   {layer}
                 </label>
               ))}
@@ -278,17 +376,16 @@ const Map = ({ vessels = [], ports = [], routes = [], weatherZones = [], events 
           </div>
           
           {/* Compact Legend */}
-          <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', color: '#f8fafc', fontSize: '0.75rem' }}>
-            <div style={{ fontWeight: 'bold', marginBottom: '6px', color: '#00d2ff' }}>LEGEND</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '10px', height: '10px', background: '#00d2ff', borderRadius: '50%' }}></div> Vessel</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '10px', height: '10px', background: '#f59e0b', borderRadius: '50%' }}></div> High Risk Vessel</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '10px', height: '10px', background: '#10b981', borderRadius: '50%' }}></div> Port</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '14px', height: '2px', background: '#10b981' }}></div> Route</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '10px', height: '10px', background: '#f59e0b', transform: 'rotate(45deg)' }}></div> Event</div>
+          <div style={{ background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)', padding: '8px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)', color: '#f8fafc', fontSize: '0.7rem' }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '4px', color: '#00d2ff' }}>LEGEND</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '8px', height: '8px', background: '#00d2ff', borderRadius: '50%' }}></div> Vessel</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '8px', height: '8px', background: '#f59e0b', borderRadius: '50%' }}></div> High Risk</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '8px', height: '8px', background: '#10b981', borderRadius: '50%' }}></div> Port</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '12px', height: '2px', background: '#10b981' }}></div> Route</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '8px', height: '8px', background: '#f59e0b', transform: 'rotate(45deg)' }}></div> Event</div>
             </div>
           </div>
-
         </div>
       </MapContainer>
     </div>
